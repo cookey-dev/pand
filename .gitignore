@@ -6,3 +6,5 @@ yarn-error.log
 errfile
 dist
 errfile
+.vscode
+bundle

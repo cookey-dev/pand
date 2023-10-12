@@ -1,16 +1,26 @@
 import bl from 'blessed';
 import figlet from 'figlet';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import strip from 'striptags';
 import invert from 'invert-color';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { decode } from 'html-entities';
+import tc from 'tinycolor2';
 import ApiOpt from './ApiOpt.js';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import Kitty from './Kitty.mjs';
 
 interface Boxes {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     [key: string]: any;
-    splash?: bl.Widgets.BoxElement;
-    splashText?: bl.Widgets.TextElement;
+    splash: bl.Widgets.BoxElement;
+    splashText: bl.Widgets.TextElement;
     bar?: bl.Widgets.BoxElement;
     dur?: bl.Widgets.BoxElement;
+    barCol?: bl.Widgets.BoxElement;
+    play?: bl.Widgets.ButtonElement;
 }
 
 class Tui extends ApiOpt {
@@ -20,37 +30,45 @@ class Tui extends ApiOpt {
         super();
         this.mplay.on('status', this.update.bind(this));
         this.mplay.on('time', this.dur.bind(this));
+        this.mplay.on('play', () => this.boxes.play?.setContent(this.icons.pause));
+        this.mplay.on('start', () => this.boxes.play?.setContent(this.icons.pause));
+        this.mplay.on('pause', () => this.boxes.play?.setContent(this.icons.play));
+
         this.scr = bl.screen({
             smartCSR: true,
             fullUnicode: true
         });
-        this.boxes = {};
         this.scr.title = 'Pandora';
-        this.scr.key(['escape', 'C-c'], () => process.exit(0));
+        this.scr.key(['escape', 'C-c'], () => {
+            this.mplay.player?.instance?.kill();
+            process.exit(0);
+        });
         this.scr.key(['C-r'], () => this.scr.render());
-        this.boxes.splash = bl.box({
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            style: {
-                fg: 'white',
-                bg: 'blue'
-            }
-        });
-        this.boxes.splashText = bl.text({
-            top: 'center',
-            left: 'center',
-            width: 'shrink',
-            height: 'shrink',
-            content: figlet.textSync('Pandora', {
-                font: 'ANSI Shadow',
+        this.boxes = {
+            splash: bl.box({
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                style: {
+                    fg: 'white',
+                    bg: 'blue'
+                }
             }),
-            style: {
-                fg: 'black',
-                bg: 'blue'
-            }
-        });
+            splashText: bl.text({
+                top: 'center',
+                left: 'center',
+                width: 'shrink',
+                height: 'shrink',
+                content: figlet.textSync('Pandora', {
+                    font: 'ANSI Shadow',
+                }),
+                style: {
+                    fg: 'black',
+                    bg: 'blue'
+                }
+            })
+        }
         this.boxes.splash.append(this.boxes.splashText);
         this.scr.append(this.boxes.splash);
         this.boxes.splash.focus();
@@ -62,9 +80,10 @@ class Tui extends ApiOpt {
      */
     fgBg(...boxes: Array<string>): void {
         const col = this.getColor();
-        for (var box of boxes) {
+        const bg = this.bgCol(col);
+        for (const box of boxes) {
             if (this.boxes[box] && this.boxes[box].style.fg && this.boxes[box].style.bg) {
-                this.boxes[box].style.bg = col;
+                this.boxes[box].style.bg = bg;
                 this.boxes[box].style.fg = invert(col, true);
             }
         }
@@ -80,12 +99,44 @@ class Tui extends ApiOpt {
         return `${min}:${('0' + sec).slice(-2)}`;
     }
     dur(sec: number) {
+        const col = this.getColor();
         this.boxes.dur?.setContent(this.prettySec(sec));
+        if (!this.metad || !this.metad.duration) return;
+        const blks = Math.round(this.scr.cols / this.metad.duration * sec);
+        if (!this.boxes.barCol) {
+            this.boxes.barCol = bl.box({
+                width: blks,
+                height: 1,
+                top: '100%-1',
+                left: 0,
+                style: {
+                    fg: invert(col, true),
+                    bg: col
+                }
+            });
+            this.scr.append(this.boxes.barCol);
+            this.boxes.dur?.setFront();
+            this.boxes.play?.setFront();
+        } else {
+            this.boxes.barCol.width = blks;
+            if (this.boxes.bar && this.boxes.bar.getContent().length >= blks) {
+                this.boxes.barCol.setContent(bl.stripTags(this.boxes.bar.getContent()).substring(0, blks)
+                    .replace(this.icons.explicit, `{red-fg}${this.icons.explicit}{/red-fg}`)
+                    .replace(this.icons.clean, `{gray-fg}${this.icons.clean}{/gray-fg}`));
+            }
+            if (this.boxes.play && parseInt(this.boxes.play.aleft.toString()) + 1 === blks) this.boxes.play.style.bg = col;
+            if (this.boxes.dur && parseInt(this.boxes.dur.aleft.toString()) >= blks) {
+                const old = bl.stripTags(this.boxes.dur.getContent());
+                const stIdx = parseInt(this.boxes.dur.aleft.toString());
+                const txtIdx = blks - stIdx;
+                this.boxes.dur.setContent(`{${col}-bg}${old.slice(0, txtIdx)}{/${col}-bg}${old.slice(txtIdx)}`);
+            }
+        }
         this.scr.render();
     }
     async source() {
-        var src = super.source.bind(this);
-        var res: Awaited<ReturnType<typeof src>>;
+        const src = super.source.bind(this);
+        let res: Awaited<ReturnType<typeof src>>;
         try {
             res = await super.source();
         } catch (err) {
@@ -101,8 +152,14 @@ class Tui extends ApiOpt {
         if (!res) throw new Error('Could not connect to Pandora!');
         return res;
     }
+    bgCol(hex: string) {
+        let col = tc(hex);
+        col = col.isDark() ? col.lighten(10) : col.darken(10);
+        return col.toHexString();
+    }
     initBar() {
-        var col = this.getColor();
+        const hex = this.getColor();
+        const col = this.bgCol(hex);
         this.boxes.bar = bl.box({
             top: '100%-1',
             left: 'center',
@@ -128,8 +185,21 @@ class Tui extends ApiOpt {
                 fg: invert(col, true)
             }
         });
+        this.boxes.play = bl.button({
+            top: '100%-1',
+            left: 'center',
+            width: 1,
+            height: 1,
+            content: this.icons.play,
+            style: {
+                bg: col,
+                fg: invert(col, true)
+            }
+        });
+        this.boxes.play.on('click', this.playPause.bind(this));
         this.scr.append(this.boxes.bar);
         this.scr.append(this.boxes.dur);
+        this.scr.append(this.boxes.play);
         this.boxes.bar.focus();
         this.scr.render();
     }

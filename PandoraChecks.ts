@@ -1,52 +1,65 @@
-export namespace PandoraChecks {
-    export namespace Rest {
-        export function isGraphQL(r: PandoraRest): r is PandoraRest.GraphQL {
-            var g = r as PandoraRest.GraphQL;
+export class PandoraChecks {
+    static Rest = {
+        isGraphQL(r: PandoraRest): r is PandoraRest.GraphQL {
+            const g = r as PandoraRest.GraphQL;
             return !!g.data;
-        }
-        export function isPlaylists(r: PandoraRest): r is PandoraRest.Playlists {
-            var p = r as PandoraRest.Playlists;
+        },
+        isPlaylists(r: PandoraRest): r is PandoraRest.Playlists {
+            const p = r as PandoraRest.Playlists;
             return p.view && p.view === 'PL';
-        }
-        export function isItems(r: PandoraRest): r is PandoraRest.Items {
-            var i = r as PandoraRest.Items;
-            var p = r as PandoraRest.Playlists;
+        },
+        isItems(r: PandoraRest): r is PandoraRest.Items {
+            const i = r as PandoraRest.Items;
+            const p = r as PandoraRest.Playlists;
             return i.items && !p.annotations;
-        }
-        export function isStations(r: PandoraRest): r is PandoraRest.Stations {
-            var s = r as PandoraRest.Stations;
+        },
+        isStations(r: PandoraRest): r is PandoraRest.Stations {
+            const s = r as PandoraRest.Stations;
             return !!s.stations;
-        }
-        export function isInfo(r: PandoraRest): r is PandoraRest.Info {
-            var i = r as PandoraRest.Info;
+        },
+        isInfo(r: PandoraRest): r is PandoraRest.Info {
+            const i = r as PandoraRest.Info;
             return !!i.subscriber;
-        }
-        export function isSource(r: PandoraRest): r is PandoraRest.Source {
-            var i = r as PandoraRest.Source;
+        },
+        isSource(r: PandoraRest): r is PandoraRest.Source {
+            const i = r as PandoraRest.Source;
             return !!i.item.audioUrl;
-        }
-        export function isPeek(r: PandoraRest): r is PandoraRest.Peek {
-            var i = r as PandoraRest.Source;
-            return isSource(i) && !i.source;
-        }
-        export function isSkip(r: PandoraRest): r is PandoraRest.Skip {
-            return isPeek(r); // peek = source
-        }
-        export function isConcerts(r: PandoraRest): r is PandoraRest.Concerts {
-            var c = r as PandoraRest.Concerts;
+        },
+        isPeek(r: PandoraRest): r is PandoraRest.Peek {
+            const i = r as PandoraRest.Source;
+            return this.isSource(i) && !i.source;
+        },
+        isSkip(r: PandoraRest): r is PandoraRest.Skip {
+            return this.isPeek(r); // peek = source
+        },
+        isConcerts(r: PandoraRest): r is PandoraRest.Concerts {
+            const c = r as PandoraRest.Concerts;
             return Array.isArray(c.artistEvents);
+        },
+        isProducts(r: PandoraRest): r is PandoraRest.Products {
+            const p = r as PandoraRest.Products;
+            return !!p.billingTerritory;
+        },
+        isSortedTypes(r: PandoraRest): r is PandoraRest.SortedTypes {
+            const s = r as PandoraRest.SortedTypes;
+            const p = r as PandoraRest.Playlists;
+            return s.annotations && s.items && !p.view;
+        },
+        isVersion(r: PandoraRest): r is PandoraRest.Version {
+            const v = r as PandoraRest.Version;
+            return !isNaN(parseInt(v));
         }
     }
-    export function isPlaylist(i: Annotations.Playlist | Annotations.PlaylistCurator): i is Annotations.Playlist {
-        var p = i as Annotations.Playlist;
+    static isPlaylist(i: Annotations.Playlist | Annotations.PlaylistCurator): i is Annotations.Playlist {
+        const p = i as Annotations.Playlist;
         return p.type === 'PL';
     }
-    export function isArtist(i: Annotations.Album | Annotations.Artist | Annotations.Track): i is Annotations.Artist {
-        var p = i as Annotations.Artist;
+    static isArtist(i: Annotations.Album | Annotations.Artist | Annotations.Track): i is Annotations.Artist {
+        const p = i as Annotations.Artist;
         return p.type === 'AR';
     }
-    export function isTrack(i: Annotations.Album | Annotations.Artist | Annotations.Track): i is Annotations.Track {
-        var p = i as Annotations.Track;
+    static isTrack(i: Annotations.Album | Annotations.Artist | Annotations.Track): i is Annotations.Track {
+        const p = i as Annotations.Track;
         return p.type === 'TR';
     }
 }

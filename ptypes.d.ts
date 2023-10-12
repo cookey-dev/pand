@@ -44,10 +44,14 @@ declare namespace PandoraTypes {
             return t === 'SharedListening';
         }
     }
+    /**
+     * Twittet handle does not include the @-symbol
+     */
+    export type TwitterHandle = string;
     export type ArtUrlFragment = PandoraTypes.UrlPath;
     export type ArtUrl = string;
     export type HexColor = string;
-    export type RecentlyPlayedTypename = 'ArtistPlay' | 'Album' | 'Playlist' | 'Station' | string;
+    export type RecentlyPlayedTypename = 'ArtistPlay' | 'Album' | 'Playlist' | 'Station' | 'Deluxe' | string;
     export type StationSort = 'lastPlayedTime' | string;
     export type Pixels = number;
     export type StringDate = string;
@@ -151,6 +155,9 @@ declare namespace Annotations {
             listenerPandoraId: PandoraTypes.Id;
             listenerIdToken: string;
         }
+        /**
+         * Usually only tracks
+         */
         includedTrackTypes: Array<PandoraTypes.ItemType>;
         collectible: boolean;
         listenerId: PandoraTypes.NumericId;
@@ -189,6 +196,7 @@ declare namespace Annotations {
         pandoraId: PandoraTypes.Id;
         type: PandoraTypes.ItemType.Album;
         scope: string;
+        visible?: boolean;
     }
     export interface Artist {
         collaboration: boolean;
@@ -196,7 +204,7 @@ declare namespace Annotations {
         variousArtist: boolean;
         megastar: boolean;
         hasTakeoverModes: boolean;
-        stationFactoryId: PandoraTypes.FactoryId;
+        stationFactoryId?: PandoraTypes.FactoryId;
         name: string;
         sortableName: string;
         icon: OtherPandoraInterfaces.Icon;
@@ -209,6 +217,8 @@ declare namespace Annotations {
         pandoraId: PandoraTypes.Id;
         type: PandoraTypes.ItemType.Artist;
         scope: string;
+        visible?: boolean;
+        twitterHandle?: PandoraTypes.TwitterHandle
     }
     export interface Track {
         name: string;
@@ -232,8 +242,11 @@ declare namespace Annotations {
         pandoraId: PandoraTypes.Id;
         type: PandoraTypes.ItemType.Track;
         scope: string;
+        visible?: boolean;
+        isrc?: string;
     }
 }
+declare type Annotations = Annotations.Album | Annotations.Artist | Annotations.Track | Annotations.Playlist;
 
 declare namespace PandoraGraphQLEntities {
     export interface StationCurator {
@@ -503,13 +516,33 @@ declare namespace PandoraRest {
         }
         source: OgSource;
     }
-    export interface Peek extends Source {
-        source: undefined;
-    }
-    export interface Skip extends Peek {}; // same response as peek
+    export interface Peek extends Omit<Source, 'source'> {}
+    export interface Skip extends Peek {} // same response as peek
     export interface Concerts {
         artistEvents: Array<OtherPandoraInterfaces.Concert>
     }
+    export interface Products {
+        listenerId: PandoraTypes.NumericId;
+        billingTerritory: PandoraTypes.CountryCode;
+        productGroups: Array<unknown>;
+    }
+    export interface SortedTypes {
+        listenerId: PandoraTypes.NumericId;
+        listenerPandoraId: PandoraTypes.Id;
+        totalCount: number;
+        offset: number;
+        limit: number;
+        annotations: {
+            [key: PandoraTypes.Id]: Annotations.Album | Annotations.Playlist | Annotations.Artist | Annotations.Track;
+        }
+        sortOrder: PandoraTypes.SortOrder;
+        version: number;
+        items: Array<PandoraSimpleItem>;
+    }
+    export interface Annotate {
+        [key: PandoraTyped.Id]: Annotations.Album | Annotations.Artist | Annotations.Album;
+    }
+    export type Version = PandoraTypes.IntString;
     export interface GraphQL {
         data: {
             entities?: Array<PandoraGraphQLEntity>;
@@ -531,7 +564,9 @@ declare type PandoraRest = PandoraRest.Playlists
                          | PandoraRest.Source 
                          | PandoraRest.Peek 
                          | PandoraRest.Skip
-                         | PandoraRest.Concerts;
+                         | PandoraRest.Concerts
+                         | PandoraRest.Products
+                         | PandoraRest.Version;
 
 // End of Pandora API responses
 

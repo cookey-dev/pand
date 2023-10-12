@@ -27,8 +27,8 @@ class Login {
         });
         this.page = this.browse.pages()[0];
         //await this.page.goto('https://pandora.com/account/sign-in');
-        var _res: Response = await this.page.waitForResponse(res => new URL(res.url()).pathname === '/api/v1/auth/login' && res.status() === 200);
-        var res: Auth = await _res.json();
+        const _res: Response = await this.page.waitForResponse(res => new URL(res.url()).pathname === '/api/v1/auth/login' && res.status() === 200);
+        const res: Auth = await _res.json();
         if (res.fullName) {
             this.auth = res;
             this.token = this.auth.authToken;

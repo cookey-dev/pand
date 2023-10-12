@@ -1,5 +1,4 @@
-/// <reference path="ptypes.d.ts"/>
-
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import got, { PlainResponse } from 'got';
 import UserAgent from 'user-agents';
@@ -9,9 +8,11 @@ import * as gql from './graphql.js';
 import { v4 as uuidv4 } from 'uuid';
 import tmp from 'tmp';
 import MPlayer from 'mplayer';
+import tc from 'tinycolor2';
 import { PandoraChecks } from './PandoraChecks.js';
-import { parseBuffer as musicMD } from 'music-metadata';
+import { IAudioMetadata, parseBuffer as musicMD } from 'music-metadata';
 import { fileTypeFromBuffer as magic } from 'file-type';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { writeFileSync as wf, readFileSync as rf } from 'fs';
 
 class Api extends Login {
@@ -20,25 +21,49 @@ class Api extends Login {
     cookieJar: CookieJar;
     uuid: string;
     mplay;
-    metad: object | null;
+    metad?: IAudioMetadata['format'];
     src?: PandoraRest.Source | PandoraRest.Peek;
     time: number;
     ogSrc?: PandoraRest.OgSource;
-    icons = {
+    icons = { // taken from https://github.com/r0wanda/pandora-term/blob/master/selectors.mjs
+        play: '▶',
+        pause: '⏸',
+        skip: '⏭',
+        rewind: '⏮',
+        replay: '↩',
+        thumbs: {
+            up_alt: '👍',
+            down_alt: '👎',
+            up: '🖒',
+            down: '🖓'
+        },
         explicit: '🅴',
         clean: '🅲'
     }
+    status: Status;
+    version: number;
     constructor() {
         super();
         this.csrf = '';
+        this.version = -1;
         this.cookieJar = new CookieJar();
         this.ua = new UserAgent().toString();
         this.uuid = uuidv4();
         this.mplay = new MPlayer();
-        this.metad = null;
         this.time = 0;
+        this.status = {
+            muted: false,
+            playing: false,
+            volume: 0,
+            duration: 0,
+            fullscreen: false,
+            subtitles: false,
+            filename: '',
+            title: ''
+        }
 
         this.mplay.volume(this.getVolume());
+        this.mplay.on('status', (st: Status) => this.status = st);
         this.mplay.on('time', (sec: number) => {
             this.time = sec;
         });
@@ -48,7 +73,7 @@ class Api extends Login {
      * @returns The user-set volume
      */
     getVolume(): PandoraTypes.Percentage { // TODO: Save volume
-        return 10;
+        return 1;
     }
     /**
      * Generic API error message
@@ -63,9 +88,8 @@ class Api extends Login {
     async init(): Promise<void> {
         await super.init();
         await this.initCsrf();
-        await this.cookieJar.setCookie(`csrftoken=${this.csrf}`, 'https://www.pandora.com');
         await this.checkCompat();
-        console.error(await this.collection());
+        //console.error(await this.collection());
         //console.error(await this.current());
     }
     /**
@@ -76,17 +100,18 @@ class Api extends Login {
             method: 'HEAD'
         });
         if (!res.headers['set-cookie']) throw new Error('Pandora HEAD request did not contain a set-cookie header');
-        for (var _c of res.headers['set-cookie']) {
+        for (const _c of res.headers['set-cookie']) {
             if (!_c) continue;
-            var parsed = Cookie.parse(_c);
+            const parsed = Cookie.parse(_c);
             if (!parsed) continue;
-            var c = parsed.toJSON();
+            const c = parsed.toJSON();
             if (c.key === 'csrftoken') {
                 this.csrf = c.value;
                 break;
             }
         }
         if (!this.csrf) throw new Error('No CSRF token could be obtained');
+        await this.cookieJar.setCookie(`csrftoken=${this.csrf}`, 'https://www.pandora.com');
     }
 
     /**
@@ -99,7 +124,7 @@ class Api extends Login {
         // Parse key
         rawKey = atob(rawKey); // atob must be used, not Buffer.from
         const key = new Uint8Array(new ArrayBuffer(rawKey.length));
-        for (var i = 0; i < rawKey.length; i++) {
+        for (let i = 0; i < rawKey.length; i++) {
             key[i] = rawKey.charCodeAt(i);
         }
 
@@ -109,7 +134,7 @@ class Api extends Login {
         keyView.set(key);
         const res = new Uint8Array(new ArrayBuffer(rawData.byteLength));
         const curBufLen = rawData.byteLength;
-        for (var i = 0; i < curBufLen; i++) {
+        for (let i = 0; i < curBufLen; i++) {
             res[i] = keyView[i % keyView.length] ^ view[i];
         }
         console.error(await magic(res));
@@ -125,13 +150,14 @@ class Api extends Login {
         const fname = tmp.fileSync().name;
         wf(fname, buf);
         this.mplay.openFile(fname);
+        this.mplay.volume(this.getVolume());
     }
     /**
      * Pulls track explicitness from cache
      * @returns Pandora representation of explicitness (documented in ptypes.d.ts as PandoraTypes.Explicit)
      */
     getExplicitness(): PandoraTypes.Explicit {
-        var an;
+        let an;
         try {
             an = this.getTrackAnnotation();
         } catch {
@@ -177,7 +203,8 @@ class Api extends Login {
      * @returns A string of the song name + explicitness (or "Buffering")
      */
     getSong(blessed = true) {
-        return this.src ? this.src.item.songName + (blessed ? this.blessedExplicitIcon() : this.getExplicitIcon()) : 'Buffering';
+        const ex = blessed ? this.blessedExplicitIcon() : this.getExplicitIcon();
+        return this.src ? `${this.src.item.songName} | ${this.src.item.artistName} ${ex}` : 'Buffering';
     }
 
     /**
@@ -188,7 +215,7 @@ class Api extends Login {
      * @returns Pandora api response
      */
     async rest(path: string, json = {}, headers = {}): Promise<PandoraRest> {
-        var url = new URL('https://www.pandora.com/');
+        const url = new URL('https://www.pandora.com/');
         url.pathname = path;
         const res: PandoraRest = await got(url.href, {
             method: 'POST',
@@ -212,7 +239,7 @@ class Api extends Login {
      * @param key Encryption key if needed
      */
     async audio(url: string, key?: string) {
-        var res: Buffer = await got(url, {
+        const res: Buffer = await got(url, {
             method: 'GET',
             headers: {
                 'Connection': 'keep-alive',
@@ -266,8 +293,36 @@ class Api extends Login {
         if (!PandoraChecks.Rest.isItems(res)) throw this.apiError();
         return res;
     }
+    async getVersion() {
+        const res = await this.rest('/api/v5/collection/getVersion');
+        if (!PandoraChecks.Rest.isVersion(res)) throw this.apiError();
+        const v = parseInt(res);
+        this.version = v;
+        return v;
+    }
+    async getSortedByTypes(offset = 0, limit = 40) {
+        const res = await this.rest('/api/v6/collections/getSortedByTypes', {
+            request: {
+                annotationLimit: limit,
+                limit,
+                offset,
+                sortOrder: 'MOST_RECENT_ADDED',
+                typePrefixes: ['ALL']
+            }
+        });
+        if (!PandoraChecks.Rest.isSortedTypes(res)) throw this.apiError();
+        return res;
+    }
+    annotateItems(annotations: { [key: PandoraTypes.Id]: Annotations }, items: Array<PandoraSimpleItem>) {
+        return items.map(it => {
+            return {
+                ...it,
+                ...(annotations[it.pandoraId] ?? {})
+            }
+        });
+    }
     async curateStations(stations: PandoraRest.Stations): Promise<Array<PandoraGraphQLEntity>> {
-        var res = await this.graphql({
+        const res = await this.graphql({
             operationName: 'GetStationCuratorsWeb',
             query: gql.STATION_CURATORS,
             variables: JSON.stringify({
@@ -278,7 +333,7 @@ class Api extends Login {
         return res.data.entities;
     }
     async recentlyPlayed(): Promise<Array<PandoraComplexItems.RecentlyPlayed>> {
-        var res = await this.graphql({
+        const res = await this.graphql({
             operationName: 'GetRecentlyPlayedSourcesWeb',
             query: gql.RECENTLY_PLAYED,
             variables: {
@@ -295,8 +350,8 @@ class Api extends Login {
      * @returns The decoded art map
      */
     parseArt(art: Array<OtherPandoraInterfaces.Art>): Parsed.Art {
-        var res: Map<string, string> = new Map();
-        for (var a of art) res.set(a.size.toString(), a.url);
+        const res: Map<string, string> = new Map();
+        for (const a of art) res.set(a.size.toString(), a.url);
         return res;
     }
     /**
@@ -309,66 +364,10 @@ class Api extends Login {
      * @returns An array of artwork urls
      */
     parseThor(thor: PandoraTypes.ThorLayers): PandoraTypes.ParsedThorLayers {
-        var arr = thor.split('images/');
+        let arr = thor.split('images/');
         arr = arr.filter(i => i.includes('@1'))
         arr = arr.map(i => `https://content-images.p-cdn.com/images/${i.split('@1')[0]}_500W_500H.jpg`);
         return arr;
-    }
-    /**
-     * Get collection (unfinished)
-     */
-    async collection() {
-        const stations = await this.getStations();
-        const curated = await this.curateStations(stations);
-        var { annotations: _pl } = await this.getSortedPlaylists();
-        var pl = Object.values(_pl);
-        const it = await this.getItems();
-        /*console.error('pl')
-        console.error(pl);
-        console.error('it');
-        console.error(it);*/
-        //onsole.error(pl);
-        var stationList = [];
-        for (var i = 0; i < stations.stations.length; i++) {
-            const st = stations.stations[i];
-            const cur = curated[i];
-            var r = {
-                orig: {
-                    st,
-                    cur
-                },
-                name: st.name,
-                art: this.parseArt(st.art),
-                id: st.pandoraId,
-                stationId: st.stationId,
-                factory: st.stationFactoryPandoraId,
-                created: new Date(st.dateCreated),
-                color: st.dominantColor,
-                curator: cur.curator ? cur.curator.name : null
-            }
-            stationList.push(r);
-        }
-        var plList = [];
-        for (var p of pl) {
-            console.error(p)
-            if (!PandoraChecks.isPlaylist(p)) continue;
-            var plR = {
-                orig: p,
-                name: p.name,
-                art: this.parseThor(p.thorLayers),
-                id: p.pandoraId,
-                tracks: p.totalTracks,
-                created: new Date(p.timeCreated),
-                updated: new Date(p.timeLastUpdated),
-                duration: p.duration,
-            }
-            plList.push(plR);
-            break;
-        }
-        var collection = [...plList, ...stationList];
-        collection.sort()
-        console.error('stationlist')
-        //console.error(stationList);
     }
     /**
      * Fetch and cache a Pandora source (anything that can be played)
@@ -472,8 +471,8 @@ class Api extends Login {
     }
     async getConcerts() { // TODO: finish this + typedefs
         if (!this.src) throw new Error('No source');
-        var id = '';
-        for (var an of Object.values(this.src.annotations)) {
+        let id = '';
+        for (const an of Object.values(this.src.annotations)) {
             if (!PandoraChecks.isArtist(an)) continue;
             id = an.pandoraId;
         }
@@ -491,8 +490,8 @@ class Api extends Login {
      */
     getTrackAnnotation(): Annotations.Track {
         if (!this.src) throw new Error('No source');
-        var res;
-        for (var an of Object.values(this.src.annotations)) {
+        let res;
+        for (const an of Object.values(this.src.annotations)) {
             if (!PandoraChecks.isTrack(an)) continue;
             res = an;
             break;
@@ -508,15 +507,17 @@ class Api extends Login {
     getColor(): string {
         const white = '#ffffff'
         if (!this.src) return white;
-        var col: string | null = '';
-        var an;
+        let col: string | null = '';
+        let an;
         try {
             an = this.getTrackAnnotation();
         } catch {
             return white;
         }
         col = an.icon.dominantColor;
-        return !col ? white : col.startsWith('#') ? col : '#' + col;
+        col = !col ? white : col.startsWith('#') ? col : '#' + col;
+        const t = tc(col);
+        return t.isValid() ? col : white;
     }
     deviceProperties() {
         const d = new Date();
@@ -542,9 +543,13 @@ class Api extends Login {
             page_view: 'collection',
             promo_code: '',
             site_version: this.auth.webClientVersion,
-            tuner_var_flags: 'SF',
+            tuner_let_flags: 'SF',
             vendor_id: 100
         }
+    }
+    playPause() {
+        if (this.status.playing) this.mplay.pause();
+        else this.mplay.play();
     }
     /**
      * Self-explanatory
@@ -552,10 +557,22 @@ class Api extends Login {
     async isPremium() {
         return (await this.infoV2()).activeProduct.productTier.toLowerCase().includes('premium');
     }
+    async getAvailableProducts(): Promise<PandoraRest.Products> {
+        const res = await this.rest('/api/v2/charon/getAvailableProducts');
+        if (!PandoraChecks.Rest.isProducts(res)) throw this.apiError();
+        return res;
+    }
+    async isUS() {
+        return (await this.getAvailableProducts()).billingTerritory.toLowerCase() === 'us';
+    }
     /**
      * Check plan compatibility
      */
     async checkCompat() {
+        if (!await this.isUS()) {
+            console.error('Pandora is only supported in the US');
+            process.exit(0);
+        }
         if (!await this.isPremium()) {
             console.error('Pandora Premium is the only product currently supported (free subscribers coming eventually) (maybe)');
             process.exit(0);
@@ -566,12 +583,13 @@ class Api extends Login {
      * @param func The function to retry (bind beforehand if needed)
      * @returns The function's return value
      */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     retry(func: () => any) {
         return new Promise<Awaited<ReturnType<typeof func>>>(r => {
-            var tries = 0;
+            let tries = 0;
             const int = setInterval(async () => {
                 try {
-                    var res = await func();
+                    const res = await func();
                     clearInterval(int);
                     r(res);
                 } catch (err) {
